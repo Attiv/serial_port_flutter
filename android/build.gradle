@@ -34,6 +34,7 @@ android {
     defaultConfig {
         minSdkVersion 16
     }
+	namespace 'com.example.flutter_serial_port'
 }
 dependencies {
     implementation 'com.github.licheedev.Android-SerialPort-API:serialport:1.0.1'
