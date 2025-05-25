@@ -149,7 +149,8 @@ public class FlutterSerialPortPlugin implements FlutterPlugin, MethodCallHandler
 
       /* Open the serial port */
       try {
-        mSerialPort = new SerialPort(new File(devicePath), baudrate, 0);
+        // mSerialPort = new SerialPort(new File(devicePath), baudrate, 0);
+		mSerialPort = new SerialPort(new File(devicePath), baudrate);
         mOutputStream = mSerialPort.getOutputStream();
         mInputStream = mSerialPort.getInputStream();
         mReadThread = new ReadThread();
