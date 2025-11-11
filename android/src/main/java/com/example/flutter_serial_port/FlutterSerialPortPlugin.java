@@ -46,25 +46,36 @@ public class FlutterSerialPortPlugin implements FlutterPlugin, MethodCallHandler
   private Handler mHandler = new Handler(Looper.getMainLooper());;
 
   private class ReadThread extends Thread {
+    private volatile boolean isRunning = true;
+
+    public void stopReading() {
+      isRunning = false;
+      interrupt();
+    }
+
     @Override
     public void run() {
       super.run();
-      while (!isInterrupted()) {
+      while (isRunning && !isInterrupted()) {
         int size;
         try {
           byte[] buffer = new byte[64];
-          if (mInputStream == null)
-            return;
+          if (mInputStream == null) {
+            break;
+          }
           size = mInputStream.read(buffer);
           // Log.d(TAG, "read size: " + String.valueOf(size));
           if (size > 0) {
             onDataReceived(buffer, size);
           }
         } catch (IOException e) {
-          e.printStackTrace();
-          return;
+          if (isRunning) {
+            Log.e(TAG, "Error reading from serial port: " + e.getMessage());
+          }
+          break;
         }
       }
+      Log.d(TAG, "ReadThread stopped");
     }
   }
 
@@ -166,33 +177,85 @@ public class FlutterSerialPortPlugin implements FlutterPlugin, MethodCallHandler
 
   private Boolean closeDevice() {
     if (mSerialPort != null) {
+      // Stop the reading thread first
+      if (mReadThread != null) {
+        mReadThread.stopReading();
+        try {
+          mReadThread.join(1000); // Wait max 1 second for thread to finish
+        } catch (InterruptedException e) {
+          Log.w(TAG, "Interrupted while waiting for ReadThread to stop");
+          Thread.currentThread().interrupt();
+        }
+        mReadThread = null;
+      }
+
+      // Close streams
+      try {
+        if (mInputStream != null) {
+          mInputStream.close();
+          mInputStream = null;
+        }
+      } catch (IOException e) {
+        Log.e(TAG, "Error closing input stream: " + e.getMessage());
+      }
+
+      try {
+        if (mOutputStream != null) {
+          mOutputStream.close();
+          mOutputStream = null;
+        }
+      } catch (IOException e) {
+        Log.e(TAG, "Error closing output stream: " + e.getMessage());
+      }
+
+      // Close serial port
       mSerialPort.close();
       mSerialPort = null;
+
+      Log.d(TAG, "Serial port closed successfully");
       return true;
     }
     return false;
   }
 
   private void writeData(byte[] data) {
+    if (mOutputStream == null) {
+      Log.e(TAG, "Cannot write: output stream is null");
+      return;
+    }
     try {
       mOutputStream.write(data);
       // mOutputStream.write('\n');
     } catch (IOException e) {
-      Log.e(TAG, e.toString());
+      Log.e(TAG, "Error writing to serial port: " + e.getMessage());
     }
   }
   @Override
   public void onAttachedToEngine(@NonNull FlutterPluginBinding flutterPluginBinding) {
-    final EventChannel eventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "serial_port/event");
-    final MethodChannel channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "serial_port");
+    eventChannel = new EventChannel(flutterPluginBinding.getBinaryMessenger(), "serial_port/event");
+    channel = new MethodChannel(flutterPluginBinding.getBinaryMessenger(), "serial_port");
     channel.setMethodCallHandler(this);
     eventChannel.setStreamHandler(this);
   }
 
   @Override
   public void onDetachedFromEngine(@NonNull FlutterPluginBinding binding) {
-    channel.setMethodCallHandler(null);
-    eventChannel.setStreamHandler(null);
+    // Clean up serial port resources
+    closeDevice();
 
+    // Clear event sink to prevent memory leaks
+    mEventSink = null;
+
+    // Clean up channels
+    if (channel != null) {
+      channel.setMethodCallHandler(null);
+      channel = null;
+    }
+    if (eventChannel != null) {
+      eventChannel.setStreamHandler(null);
+      eventChannel = null;
+    }
+
+    Log.d(TAG, "Plugin detached and resources cleaned up");
   }
 }
